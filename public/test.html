@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Helpdesk Test</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    .ticket { border: 1px solid #aaa; padding: 10px; margin: 8px 0; display: flex; justify-content: space-between; }
+    .locked { background: #ddd; color: #666; }
+    #banner { display: none; background: red; color: white; padding: 8px; }
+  </style>
+</head>
+<body>
+  <div id="banner">Connection Lost: Reconnecting...</div>
+  <h2>Agent: <span id="me"></span></h2>
+  <div id="list"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const agentName = prompt("Agent name?") || "Agent";
+    document.getElementById("me").textContent = agentName;
+
+    const tickets = [101, 102, 103, 104];
+    const locks = {};          // ticketId -> { agentName, socketId }
+    const socket = io();
+
+    socket.on("connect", () => {
+      document.getElementById("banner").style.display = "none";
+      socket.emit("join_dashboard", { agentName });
+    });
+    socket.on("disconnect", () => {
+      document.getElementById("banner").style.display = "block";
+    });
+
+    socket.on("locks_state", (all) => {
+      Object.keys(locks).forEach((k) => delete locks[k]);
+      Object.entries(all).forEach(([id, v]) => (locks[id] = v));
+      render();
+    });
+    socket.on("ticket_locked", ({ ticketId, agentName, socketId }) => {
+      locks[ticketId] = { agentName, socketId };
+      render();
+    });
+    socket.on("ticket_unlocked", ({ ticketId }) => {
+      delete locks[ticketId];
+      render();
+    });
+    socket.on("lock_rejected", ({ ticketId, lockedBy }) => {
+      alert("Ticket #" + ticketId + " already locked by " + lockedBy);
+    });
+
+    function render() {
+      const list = document.getElementById("list");
+      list.innerHTML = "";
+      tickets.forEach((id) => {
+        const lock = locks[id];
+        const mine = lock && lock.socketId === socket.id;
+        const div = document.createElement("div");
+        div.className = "ticket" + (lock && !mine ? " locked" : "");
+        let status = "";
+        if (lock) status = mine ? "🔒 You are editing" : "🔒 Locked by " + lock.agentName;
+        div.innerHTML = "<span>Ticket #" + id + " " + status + "</span>";
+        const btn = document.createElement("button");
+        if (mine) {
+          btn.textContent = "Close";
+          btn.onclick = () => socket.emit("unlock_ticket", { ticketId: id });
+        } else {
+          btn.textContent = "Edit";
+          btn.disabled = !!lock;
+          btn.onclick = () => socket.emit("lock_ticket", { ticketId: id });
+        }
+        div.appendChild(btn);
+        list.appendChild(div);
+      });
+    }
+    render();
+  </script>
+</body>
+</html>
